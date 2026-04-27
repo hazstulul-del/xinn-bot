@@ -8,33 +8,38 @@ import pytz
 from datetime import datetime
 
 # ============================================================
-# CONFIG — SUDAH FIX
+# CONFIG
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8623794473:AAHWHIf5qB9Oejtr1Hos6TA91fUvhVeiR3Q")
 OWNER_ID = int(os.getenv("OWNER_ID", "7562630960"))
-VERSION = "v4.1.0"
+VERSION = "v5.0.0"
 WIB = pytz.timezone("Asia/Jakarta")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ============================================================
-# API ENDPOINTS
+# API ENDPOINTS (MULTI FALLBACK)
 # ============================================================
-API_TIKTOK = "https://api.tiklydown.eu.org/api/download"
+TIKTOK_APIS = [
+    "https://www.tikwm.com/api/",
+    "https://api.tiklydown.eu.org/api/download",
+    "https://api.douyin.wtf/api",
+]
+
 API_IG = "https://api.nyxs.pw/dl/instagram"
 API_YT = "https://api.nyxs.pw/dl/youtube"
 API_SPOTIFY = "https://api.nyxs.pw/dl/spotify"
 API_CUACA = "https://wttr.in"
 
 # ============================================================
-# FUNGSI WAKTU WIB
+# WAKTU
 # ============================================================
 def get_wib():
     now = datetime.now(WIB)
     return now.strftime("%H:%M:%S | %d %b %Y")
 
 # ============================================================
-# START — DENGAN VIDEO BANNER
+# START
 # ============================================================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -72,7 +77,7 @@ def start(message):
     bot.send_video(message.chat.id, video_url, caption=caption, parse_mode="Markdown", reply_markup=markup)
 
 # ============================================================
-# CALLBACK HANDLER
+# CALLBACK
 # ============================================================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
@@ -115,10 +120,9 @@ def callback_handler(call):
 
     elif data == "menu_anime":
         quotes = [
-            "Jangan menyerah hanya karena satu kegagalan. — Naruto",
-            "Percayalah padaku yang percaya padamu! — Kamina",
-            "Rasa sakit membuatmu lebih kuat. — Itachi",
-            "Aku tidak akan lari, aku tidak akan mundur! — Naruto"
+            "Jangan menyerah. — Naruto",
+            "Percayalah padaku! — Kamina",
+            "Rasa sakit membuatmu kuat. — Itachi"
         ]
         bot.send_message(call.message.chat.id, f"🎭 *ANIME QUOTE*\n⏰ {get_wib()}\n\n\"{random.choice(quotes)}\"", parse_mode="Markdown")
 
@@ -127,7 +131,7 @@ def callback_handler(call):
 
     elif data == "menu_admin":
         if uid == OWNER_ID:
-            bot.send_message(call.message.chat.id, f"👑 *ADMIN PANEL*\n⏰ {get_wib()}\n✅ Bot aktif\n📊 Version: {VERSION}\n👥 User: {random.randint(20,200)}", parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, f"👑 *ADMIN*\n⏰ {get_wib()}\n✅ Bot aktif\n📊 {VERSION}", parse_mode="Markdown")
         else:
             bot.send_message(call.message.chat.id, "⛔ Akses ditolak.")
 
@@ -144,24 +148,58 @@ def callback_handler(call):
         bot.send_message(call.message.chat.id, f"🎰 [{' | '.join(h)}]\n{m}", parse_mode="Markdown")
 
 # ============================================================
-# TIKTOK DOWNLOADER
+# TIKTOK DOWNLOADER — MULTI API FALLBACK
 # ============================================================
 def download_tiktok(message):
     url = message.text.strip()
     msg = bot.send_message(message.chat.id, "⏳ *Mendownload dari TikTok...*", parse_mode="Markdown")
-    try:
-        res = requests.get(f"{API_TIKTOK}?url={url}", timeout=10)
-        data = res.json()
-        if data.get("video"):
-            video_url = data["video"]["noWatermark"]
-            caption = data.get("title", "TikTok Video")
-            author = data.get("author", {}).get("name", "Unknown")
-            bot.delete_message(message.chat.id, msg.message_id)
-            bot.send_video(message.chat.id, video_url, caption=f"✅ *{caption}*\n👤 {author}\n⏰ {get_wib()}", parse_mode="Markdown")
-        else:
-            bot.edit_message_text("❌ Gagal download. Cek link.", message.chat.id, msg.message_id)
-    except:
-        bot.edit_message_text("❌ Error. Coba lagi nanti.", message.chat.id, msg.message_id)
+
+    for api in TIKTOK_APIS:
+        try:
+            res = requests.get(f"{api}?url={url}", timeout=15)
+            data = res.json()
+            video_url = None
+            title = "TikTok Video"
+            author = "Unknown"
+
+            # --- Parse API 1: tikwm.com ---
+            if "tikwm" in api:
+                if data.get("data"):
+                    video_url = data["data"].get("play") or data["data"].get("video")
+            # --- Parse API 2: tiklydown ---
+            elif "tiklydown" in api:
+                if data.get("video"):
+                    video_url = data["video"].get("noWatermark") or data["video"].get("url")
+                    title = data.get("title", title)
+                    author = data.get("author", {}).get("name", author)
+            # --- Parse API 3: douyin.wtf ---
+            elif "douyin" in api:
+                if data.get("data"):
+                    video_url = data["data"].get("play") or data["data"].get("video")
+                    title = data["data"].get("title", title)
+                    author = data["data"].get("author", {}).get("name", author)
+
+            # --- Kalau dapat video, kirim ---
+            if video_url:
+                bot.delete_message(message.chat.id, msg.message_id)
+                bot.send_video(
+                    message.chat.id,
+                    video_url,
+                    caption=f"✅ *{title}*\n👤 {author}\n⏰ {get_wib()}",
+                    parse_mode="Markdown"
+                )
+                return  # SUCCESS, keluar
+
+        except:
+            continue  # Coba API berikutnya
+
+    # Kalau semua API gagal
+    bot.edit_message_text(
+        "❌ *Gagal download.*\n\n"
+        "🔧 Semua API sedang down.\n"
+        "🔄 Coba lagi nanti atau kirim link TikTok yang berbeda.",
+        message.chat.id, msg.message_id, parse_mode="Markdown"
+    )
 
 # ============================================================
 # INSTAGRAM DOWNLOADER
@@ -180,9 +218,9 @@ def download_ig(message):
             else:
                 bot.edit_message_text("❌ Tidak bisa ambil media.", message.chat.id, msg.message_id)
         else:
-            bot.edit_message_text("❌ Gagal download. Cek link.", message.chat.id, msg.message_id)
+            bot.edit_message_text("❌ Gagal download.", message.chat.id, msg.message_id)
     except:
-        bot.edit_message_text("❌ Error. Coba lagi nanti.", message.chat.id, msg.message_id)
+        bot.edit_message_text("❌ Error.", message.chat.id, msg.message_id)
 
 # ============================================================
 # YOUTUBE DOWNLOADER
@@ -195,24 +233,24 @@ def download_yt(message):
         data = res.json()
         if data.get("status") == 200:
             info = data.get("data", {})
-            judul = info.get("title", "YouTube Video")
+            judul = info.get("title", "YouTube")
             download_url = info.get("url") or info.get("download")
             if download_url:
                 bot.delete_message(message.chat.id, msg.message_id)
                 bot.send_video(message.chat.id, download_url, caption=f"✅ *{judul}*\n⏰ {get_wib()}", parse_mode="Markdown")
             else:
-                bot.edit_message_text("❌ Link download tidak tersedia.", message.chat.id, msg.message_id)
+                bot.edit_message_text("❌ Tidak tersedia.", message.chat.id, msg.message_id)
         else:
-            bot.edit_message_text("❌ Gagal download. Cek link.", message.chat.id, msg.message_id)
+            bot.edit_message_text("❌ Gagal download.", message.chat.id, msg.message_id)
     except:
-        bot.edit_message_text("❌ Error. Coba lagi nanti.", message.chat.id, msg.message_id)
+        bot.edit_message_text("❌ Error.", message.chat.id, msg.message_id)
 
 # ============================================================
-# SPOTIFY DOWNLOADER
+# SPOTIFY
 # ============================================================
 def download_spotify(message):
     url = message.text.strip()
-    msg = bot.send_message(message.chat.id, "⏳ *Mengambil info Spotify & mencari di YouTube...*", parse_mode="Markdown")
+    msg = bot.send_message(message.chat.id, "⏳ *Spotify → YouTube...*", parse_mode="Markdown")
     try:
         res = requests.get(f"{API_SPOTIFY}?url={url}", timeout=10)
         data = res.json()
@@ -220,31 +258,23 @@ def download_spotify(message):
             info = data.get("data", {})
             judul = info.get("title", "Unknown")
             artis = info.get("artist", "Unknown")
-            album = info.get("album", "")
-            bot.edit_message_text(f"🎵 *{judul}* — {artis}\n💿 {album}\n⏳ Mencari di YouTube...", message.chat.id, msg.message_id, parse_mode="Markdown")
-
+            bot.edit_message_text(f"🎵 *{judul}* — {artis}\n⏳ Mencari di YouTube...", message.chat.id, msg.message_id, parse_mode="Markdown")
             query = f"{judul} {artis} audio"
-            yt_search = requests.get(f"https://api.nyxs.pw/search/youtube?query={query}", timeout=10)
-            yt_data = yt_search.json()
-            if yt_data.get("status") == 200 and yt_data.get("data"):
-                yt_url = yt_data["data"][0]["url"]
-                dl = requests.get(f"https://api.nyxs.pw/dl/youtube?url={yt_url}", timeout=15)
-                dl_data = dl.json()
-                if dl_data.get("status") == 200 and dl_data.get("data"):
-                    audio_url = dl_data["data"].get("url") or dl_data["data"].get("download")
-                    if audio_url:
+            yt = requests.get(f"https://api.nyxs.pw/search/youtube?query={query}", timeout=10).json()
+            if yt.get("data"):
+                yt_url = yt["data"][0]["url"]
+                dl = requests.get(f"https://api.nyxs.pw/dl/youtube?url={yt_url}", timeout=15).json()
+                if dl.get("data"):
+                    audio = dl["data"].get("url") or dl["data"].get("download")
+                    if audio:
                         bot.delete_message(message.chat.id, msg.message_id)
-                        bot.send_audio(message.chat.id, audio_url, title=judul, performer=artis, caption=f"✅ *{judul}* — {artis}\n🎧 Dari Spotify via YouTube\n⏰ {get_wib()}", parse_mode="Markdown")
-                    else:
-                        bot.edit_message_text("❌ Gagal ambil audio.", message.chat.id, msg.message_id)
-                else:
-                    bot.edit_message_text("❌ Gagal download dari YouTube.", message.chat.id, msg.message_id)
-            else:
-                bot.edit_message_text("❌ Tidak ditemukan di YouTube.", message.chat.id, msg.message_id)
+                        bot.send_audio(message.chat.id, audio, title=judul, performer=artis, caption=f"✅ *{judul}* — {artis}\n⏰ {get_wib()}", parse_mode="Markdown")
+                        return
+            bot.edit_message_text("❌ Tidak ditemukan.", message.chat.id, msg.message_id)
         else:
-            bot.edit_message_text("❌ Gagal ambil info Spotify.", message.chat.id, msg.message_id)
+            bot.edit_message_text("❌ Gagal.", message.chat.id, msg.message_id)
     except:
-        bot.edit_message_text("❌ Error. Coba lagi nanti.", message.chat.id, msg.message_id)
+        bot.edit_message_text("❌ Error.", message.chat.id, msg.message_id)
 
 # ============================================================
 # CUACA
@@ -253,7 +283,7 @@ def cek_cuaca(message):
     kota = message.text.strip()
     try:
         res = requests.get(f"{API_CUACA}/{kota}?format=%t+%C+%h+%w", timeout=5)
-        bot.send_message(message.chat.id, f"🌤️ *CUACA {kota.upper()}*\n⏰ {get_wib()}\n\n{res.text}", parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"🌤️ *{kota.upper()}*\n⏰ {get_wib()}\n\n{res.text}", parse_mode="Markdown")
     except:
         bot.send_message(message.chat.id, "❌ Kota tidak ditemukan.")
 
@@ -261,8 +291,8 @@ def cek_cuaca(message):
 # SEARCH
 # ============================================================
 def cari_google(message):
-    query = message.text.strip()
-    bot.send_message(message.chat.id, f"🔍 *Hasil: {query}*\n⏰ {get_wib()}\n\n🔗 [Cari di Google](https://google.com/search?q={query})", parse_mode="Markdown", disable_web_page_preview=True)
+    q = message.text.strip()
+    bot.send_message(message.chat.id, f"🔍 *{q}*\n⏰ {get_wib()}\n\n🔗 [Google](https://google.com/search?q={q})", parse_mode="Markdown", disable_web_page_preview=True)
 
 # ============================================================
 # FALLBACK
